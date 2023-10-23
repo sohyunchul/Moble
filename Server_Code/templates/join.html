@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+	<link rel="stylesheet" href="{{ url_for('static', filename ='css/bootstrap.css') }}" />
+	<link rel="stylesheet" href="{{ url_for('static', filename ='css/join.css') }}" />
+<title>Object_Defect</title>
+</head>
+<body style="background-color: rgba(240,240,240,100);">
+	<!-- 기존 내용을 유지하고 Flash 메시지를 표시할 위치 추가 -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}         
+                <!-- error 메시지 -->
+                <div class="alert alert-danger" role="alert">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+	<div class="container" style="padding-top: 50px">
+		<div class="col-xs-12 col-md-4"></div>
+		<div class="col-xs-12 col-md-4">
+			<div class="wrapper">
+				<form method="post" action="http://3.34.107.119:5000/join/action">
+					<div><h1>회원가입</h1></div>
+					<div class="form-group" style="padding-top: 20px">
+						<label for="userID">아이디</label>
+						<input type="text" class="form-control" placeholder="내용을 입력해주세요." name="userID" maxlength="15">
+					</div>
+					<div class="form-group">
+						<label for="userPassword">비밀번호</label>
+						<input type="password" id = "userPassword" class="form-control" placeholder="내용을 입력해주세요." name="userPassword" maxlength="15">
+					</div>
+					<div class="form-group">
+						<label for="userName">이름</label>
+						<input type="text" class="form-control" placeholder="내용을 입력해주세요." name="userName" maxlength="15">
+					</div>
+					<div class="form-group">
+						<label for="userBirth">생년월일</label>
+						<div class="form-inline">
+							<input type="text" class="form-control birthyy" placeholder="년(4자)" name="userBirthyy" maxlength="4">
+							<select class="form-control birthmm" name="userBirthmm">
+							<option value="1">1</option>
+							<option value="2">2</option>
+							<option value="3">3</option>
+							<option value="4">4</option>
+							<option value="5">5</option>
+							<option value="6">6</option>
+							<option value="7">7</option>
+							<option value="8">8</option>
+							<option value="9">9</option>
+							<option value="10">10</option>
+							<option value="11">11</option>
+							<option value="12">12</option>
+							</select>
+							<input type="text" class="form-control birthdd" placeholder="일" name="userBirthdd" maxlength="2">
+						</div>
+					</div>
+					<div class="form-group">
+						<label for="userPhone">전화번호</label>
+						<input type="tel" class="form-control" placeholder="내용을 입력해주세요." name="userPhone" maxlength="12">
+					</div>
+					<div class="form-group">
+						<label for="userEmail">이메일</label>
+						<input type="text" class="form-control" placeholder="내용을 입력해주세요." name="userEmail" maxlength="30">
+					</div>
+					<div style="padding-top: 10px">
+						<input type="submit" id="submit" class="form-control submit" style="background-color: rgb(189, 189, 189); color:black;" value="회 원 가 입">
+					</div>
+				</form>
+			</div>
+		</div>
+		<div class="col-xs-12 col-md-4"></div>
+	</div>
+	<script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+	<script src="../static/js/bootstrap.js"></script>
+</body>
+</html>
