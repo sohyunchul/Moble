@@ -172,3 +172,6 @@ video_streaming()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0')  # 웹 서버 시작
+
+    a= 1
+    print(a)
