@@ -1,31 +1,165 @@
-from flask import Flask, render_template, request, flash, session, Response, send_file
-import requests 
-from urllib.parse import urlencode, unquote
-import json
+from flask import Flask, render_template, request, flash, session, Response, jsonify
+from urllib.parse import unquote
 from dotenv import load_dotenv
-import os
-import pymysql
+from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime
+import DB_Connect
+import Object_Yolo
+import numpy as np
+from PIL import Image
 import cv2
-import threading
 
-app = Flask(__name__)  # Initialise app
+app = Flask(__name__)  # Initialise ap
 
-def generate_frames():
+# 전역변수
+frame_data = 0
+object_weight = 0
+conveyor_running = ""
+objects = ""
+db_image_path = ""
+res = ""
+result = ""
+date = ""
+
+def gen():
     while True:
-        frame = cv2.imread('image.jpg')  # 이미지를 읽어옵니다.
-        ret, buffer = cv2.imencode('.jpg', frame)
-        if ret:
-            frame = buffer.tobytes()
-            yield (b'--frame\r\n'
-                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        global frame_data
+    
+        yield (b'--frame\r\n'
+            b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+# 라즈베리 파이에서 POST 요청을 수신하여 영상 처리 및 스트리밍
+@app.route('/video_feed', methods=['GET', 'POST'])
+def video_stream():
+    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
-@app.route('/image')
-def image():
-    return send_file('image.jpg', mimetype='image/jpeg')
+# 라즈베리 파이에서 POST 요청을 수신하여 영상 처리 및 스트리밍
+@app.route('/video_save', methods=['POST'])
+def video_save():
+    global conveyor_running, object_weight
+    # POST 요청에서 이미지 데이터를 읽어옵니다.
+    image_data = request.data
+    image_array = np.frombuffer(image_data, dtype=np.uint8)
+    
+    # 이미지 데이터를 OpenCV 형식으로 변환
+    frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+    
+    # OpenCV 이미지를 PIL 이미지로 변환
+    image_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    image_pil.save('captured_image.jpg', 'JPEG') 
+    
+    global frame_data
+    with open('captured_image.jpg', 'rb') as file:
+        frame_data = file.read()
+    response_data = {"message": conveyor_running, "object_weight": object_weight}
+    # 컨베이어, 무게 설정 값 초기화
+    object_weight = 0
+    conveyor_running = ""
+    return jsonify(response_data)
+
+# video streaming을 사용하지 않고 데이터 통신할 때 활용하는 코드
+@app.route('/data_streaming', methods=['POST'])
+def data_streaming():
+    global conveyor_running, object_weight
+    # POST 데이터 가져오기
+    data = request.data
+    
+    response_data = {"message": conveyor_running, "object_weight": object_weight}
+    # 컨베이어, 무게 설정 값 초기화
+    object_weight = 0
+    conveyor_running = ""
+    return jsonify(response_data)
+    
+
+@app.route('/start_conveyor', methods=['POST', 'GET'])
+def start_conveyor():
+    global conveyor_running
+    data = request.get_json()
+    conveyor_running = data.get('action')
+    return "start"
+    
+@app.route('/stop_conveyor', methods=['POST', 'GET'])
+def stop_conveyor():
+    global conveyor_running
+    data = request.get_json()
+    conveyor_running = data.get('action')
+    return "stop"
+
+@app.route('/change_weight', methods=['POST'])
+def change_weight():
+    global object_weight
+    data = request.get_json()
+    object_weight = data.get('weight')
+    return "change"
+    
+
+@app.route('/image_save', methods=['POST'])
+def image_save():
+    global res, objects, db_image_path, result, date
+    local_image_dir = '/home/ubuntu/final_project/static/detect_images'  # 로컬 저장 디렉토리를 원하는 경로로 수정
+    db_image_dir = '../static/detect_images'
+    
+    connect_db, cursor = DB_Connect.db_connect()
+    sql = "SELECT COUNT(*) FROM OBJECT"
+    cursor.execute(sql)
+    res = cursor.fetchall()
+    res = str(res[0][0]+1)
+    try:
+        current_time = datetime.now()
+        image_file = f'{current_time.strftime("%Y-%m-%d_%H-%M-%S")}.jpg'  # 형식에 맞게 파일 이름 생성
+        date = current_time.strftime("%Y-%m-%d %H:%M:%S")
+        # POST 요청에서 이미지 데이터를 읽어옵니다.
+        image_data = request.data
+        image_array = np.frombuffer(image_data, dtype=np.uint8)
+        
+        # 이미지 데이터를 OpenCV 형식으로 변환
+        frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+        
+        # OpenCV 이미지를 PIL 이미지로 변환
+        image_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        image_path = f'{local_image_dir}/{image_file}'
+        image_pil.save(image_path)
+        
+        db_image_path = f'{db_image_dir}/{image_file}'
+        result, objects = Object_Yolo.object_detect(image_path)
+        # 이미지에서 불량 검출 YOLO
+        # YOLO에서 PCB 불량이 검출 됐을 때
+        if result != "" and objects == "PCB":
+            DB_Connect.object_insert(cursor, connect_db, res, objects, 0, db_image_path, "반도체", result, False, date)
+            response_data = {"message": "detect", "object": objects}
+            return jsonify(response_data)
+        # YOLO에서 오렌지팩 불량이 검출 됐을 때
+        elif result != "" and objects == "orange_juice":
+            DB_Connect.object_insert(cursor, connect_db, res, objects, 0, db_image_path, "쥬스", result, False, date)
+            response_data = {"message": "detect", "object": objects}
+            return jsonify(response_data)
+        # YOLO 검출x PCB
+        elif result == "" and objects == "PCB":
+            DB_Connect.object_insert(cursor, connect_db, res, objects, 0, db_image_path, "반도체", result, True, date)
+            response_data = {"message": "None", "object": objects}
+            return jsonify(response_data)
+        # YOLO 검출 x 오렌지 팩
+        elif result == "" and objects == "orange_juice":
+            response_data = {"message": "None", "object": objects}
+            return jsonify(response_data)
+        else:
+            response_data = {"message": "None", "object": "None"}
+            return jsonify(response_data)
+    except Exception as e:
+        response_data = {"message": "error", "object": "None","error_message": str(e)}
+        return jsonify(response_data)
+
+# object_server
+@app.route('/object_save', methods=['POST'])
+def object_save():
+    global res, objects, db_image_path, result, date
+    connect_db, cursor = DB_Connect.db_connect()
+    message, weight = str(request.json["message"]), request.json["weight"]
+    if message == "Good":
+        DB_Connect.object_insert(cursor, connect_db, res, objects, weight, db_image_path, "쥬스", result, True, date)
+    else:
+        DB_Connect.object_insert(cursor, connect_db, res, objects, weight, db_image_path, "쥬스", "Bad_weight", False, date)
+    return "good"
 
 @app.route("/")
 def index():
@@ -48,17 +182,9 @@ def login_action():
         userID = request.form["userID"]
         userPassword = request.form["userPassword"]
         
-        connect_db = pymysql.connect(  
-            user="root",
-            password="1234",
-            host="127.0.0.1",
-            db="detection",
-            charset="utf8",
-        )
-        #객체 생성
-        cursor = connect_db.cursor()
-        sql = "SELECT userid, userpw, name, authority FROM user WHERE USERID = %s"
-        cursor.execute(sql, (userID))
+        connect_db, cursor = DB_Connect.db_connect()
+        sql = "SELECT USERID, USERPW, NAME, AUTHORITY FROM USER WHERE USERID = %s"
+        cursor.execute(sql, (userID,))
         res = cursor.fetchall()
         db_userid, db_userpw, db_authority, db_name = 0, 0, 0, 0
         for userid, userpw, name, authority in res:
@@ -99,16 +225,9 @@ def join_action():
         userEmail=request.form["userEmail"]
         userBirth=userBirthyy+"-"+userBirthmm+"-"+userBirthdd
                 
-        connect_db = pymysql.connect(  
-            user="root",
-            password="1234",
-            host="127.0.0.1",
-            db="detection",
-            charset="utf8",
-        )
-        cursor = connect_db.cursor()
-        sql = "SELECT count(*) FROM user WHERE USERID = %s"
-        cursor.execute(sql, (userID))
+        connect_db, cursor = DB_Connect.db_connect()
+        sql = "SELECT COUNT(*) FROM USER WHERE USERID = %s"
+        cursor.execute(sql, (userID,))
         res = cursor.fetchall()
         cnt = 0
         for value in res:
@@ -123,8 +242,8 @@ def join_action():
             return render_template("join.html")
         #객체 생성
         cursor = connect_db.cursor()
-        sql = "INSERT INTO user VALUES(%s, %s, %s, %s, %s, %s,'대기')"
-        cursor.execute(sql, (userID,userPassword,userName, userPhone, userBirth, userEmail))
+        sql = "INSERT INTO USER VALUES(%s, %s, %s, %s, %s, %s,'대기')"
+        cursor.execute(sql, (userID,userPassword,userName, userPhone, userBirth, userEmail,))
         connect_db.commit() 
         connect_db.close()
     return render_template("login.html")
@@ -140,15 +259,8 @@ def admin_employee():
     userid = request.args.get('userid', type=str)
     page = request.args.get('page', type=int, default=1)
     if userid is None or userid == "":
-        connect_db = pymysql.connect(  
-            user="root",
-            password="1234",
-            host="127.0.0.1",
-            db="detection",
-            charset="utf8",
-        )
-        cursor = connect_db.cursor()
-        sql = "SELECT userid, name, authority FROM user WHERE authority = '직원'"
+        connect_db, cursor = DB_Connect.db_connect()
+        sql = "SELECT USERID, NAME, AUTHORITY FROM USER WHERE AUTHORITY = '직원'"
         cursor.execute(sql)
         items = cursor.fetchall()
         
@@ -161,17 +273,10 @@ def admin_employee():
             admin = "직원",
         )
     else:
-        connect_db = pymysql.connect(  
-            user="root",
-            password="1234",
-            host="127.0.0.1",
-            db="detection",
-            charset="utf8",
-        )
-        cursor = connect_db.cursor()
-        sql = "UPDATE user SET authority = '대기' WHERE userid = %s"
-        cursor.execute(sql, (userid))
-        sql = "SELECT userid, name, authority FROM user WHERE authority = '직원'"
+        connect_db, cursor = DB_Connect.db_connect()
+        sql = "UPDATE USER SET AUTHORITY = '대기' WHERE USERID = %s"
+        cursor.execute(sql, (userid,))
+        sql = "SELECT USERID, NAME, AUTHORITY FROM USER WHERE AUTHORITY = '직원'"
         cursor.execute(sql)
         items = cursor.fetchall()
         
@@ -195,19 +300,10 @@ def admin_wait():
     userid = request.args.get('userid', type=str)
     page = request.args.get('page', type=int, default=1)
     if userid is None or userid == "":
-        connect_db = pymysql.connect(  
-            user="root",
-            password="1234",
-            host="127.0.0.1",
-            db="detection",
-            charset="utf8",
-        )
-        cursor = connect_db.cursor()
-        sql = "SELECT userid, name, authority FROM user WHERE authority = '대기'"
+        connect_db, cursor = DB_Connect.db_connect()
+        sql = "SELECT USERID, NAME, AUTHORITY FROM USER WHERE AUTHORITY = '대기'"
         cursor.execute(sql)
         items = cursor.fetchall()
-        item_count = int(len(items) / 10) if len(items) % 10 == 0 else int(len(items) / 10 + 1)
-        items = items[(page - 1) * 10 : page * 10]
         
         connect_db.commit() 
         connect_db.close()
@@ -215,25 +311,16 @@ def admin_wait():
             "admin.html",
             page = page,
             items = items,
-            item_count = item_count,
             admin = "대기",
         )
     else:
-        connect_db = pymysql.connect(  
-            user="root",
-            password="1234",
-            host="127.0.0.1",
-            db="detection",
-            charset="utf8",
-        )
-        cursor = connect_db.cursor()
-        sql = "UPDATE user SET authority = '직원' WHERE userid = %s"
-        cursor.execute(sql, (userid))
-        sql = "SELECT userid, name, authority FROM user WHERE authority = '대기'"
+        print(userid)
+        connect_db, cursor = DB_Connect.db_connect()
+        sql = "UPDATE USER SET AUTHORITY = '직원' WHERE USERID = %s"
+        cursor.execute(sql, (userid,))
+        sql = "SELECT USERID, NAME, AUTHORITY FROM USER WHERE AUTHORITY = '대기'"
         cursor.execute(sql)
         items = cursor.fetchall()
-        item_count = int(len(items) / 10) if len(items) % 10 == 0 else int(len(items) / 10 + 1)
-        items = items[(page - 1) * 10 : page * 10]
         
         connect_db.commit()
         connect_db.close()
@@ -241,7 +328,6 @@ def admin_wait():
             "admin.html",
             page = page,
             items = items,
-            item_count = item_count,
             admin = "대기",
         )
         
@@ -250,19 +336,12 @@ def admin_wait():
 def main():
     if 'userID' not in session:
         return render_template("login.html")
-    connect_db = pymysql.connect(  
-            user="root",
-            password="1234",
-            host="127.0.0.1",
-            db="detection",
-            charset="utf8",
-    )
-    cursor = connect_db.cursor()
-    sql = "SELECT A.ob_num, ob_name, ob_weight, ob_type, ob_state, ob_poor, ob_date, ob_image FROM object A INNER JOIN object_log B ON A.ob_num = B.ob_num"
+    connect_db, cursor = DB_Connect.db_connect()
+    sql = "SELECT A.OB_NUM, OB_NAME, OB_WEIGHT, OB_TYPE, OB_STATE, OB_POOR, OB_DATE, OB_IMAGE FROM OBJECT A INNER JOIN OBJECT_LOG B ON A.OB_NUM = B.OB_NUM ORDER BY A.OB_NUM DESC"
     cursor.execute(sql)
     items = cursor.fetchall()
     
-    sql = "SELECT DATE_FORMAT(ob_date, '%Y-%m-%d') AS ob_date, COUNT(*) AS count FROM OBJECT_LOG WHERE OB_STATE = FALSE GROUP BY DATE_FORMAT(ob_date, '%Y-%m-%d') ORDER BY ob_date DESC LIMIT 7"
+    sql = "SELECT DATE_FORMAT(OB_DATE, '%Y-%m-%d') AS OB_DATE, COUNT(*) AS COUNT FROM OBJECT_LOG WHERE OB_STATE = FALSE GROUP BY DATE_FORMAT(OB_DATE, '%Y-%m-%d') ORDER BY OB_DATE DESC LIMIT 7"
     cursor.execute(sql)
     chart_items = cursor.fetchall()
     connect_db.commit()
@@ -277,4 +356,4 @@ def main():
 if __name__=="__main__":
     app.secret_key = 'super secret key'
     app.config['SESSION_TYPE'] = 'filesystem'
-    app.run(port=5000, debug=True)
+    app.run(host="0.0.0.0", port="5000", debug=True)
