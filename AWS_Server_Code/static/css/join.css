@@ -1,0 +1,74 @@
+@charset "UTF-8";
+@import url('https://fonts.googleapis.com/css2?family=Jua&display=swap');
+
+* {
+    font-family: 'Jua', sans-serif;
+}
+
+.wrapper {
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	min-height: 80vh;
+}
+
+.wrapper-login{
+	display: grid;
+	justify-content: center;
+	align-items: center;
+	min-height: 80vh;
+}
+
+.wrapper-logo{
+	display: grid;
+	justify-content: center;
+	align-items: center;
+	min-height: 72vh;
+}
+
+.form-control {
+	display: table;
+	height: 47px;
+}
+
+.submit {
+	background-color: rgb(164, 214, 82);
+	border: none;
+	font-weight: bold;
+	height: 47px;
+	color: white;
+}
+
+.submit:hover {
+	background-color: rgb(164, 214, 82);
+}
+
+.submit:active{
+	border: none;
+	background-color: rgb(164, 214, 82);
+}
+
+h1 {
+	text-align: center;
+	color: black;
+	font-weight: bold;
+}
+
+.form-control.birthyy{
+	display: table-cell;
+	margin-right: 3.5%;
+	width: 30%;
+}
+.form-control.birthmm{
+	display: table-cell;
+	margin-right: 3.5%;
+	width: 30%;
+}
+.form-control.birthdd{
+	display: table-cell;
+	width: 30%;
+}
+
+option {
+	height: 10px;
+}
